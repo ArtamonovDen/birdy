@@ -41,6 +41,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lib-genetic-algorithm"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "rand",
+ "rand_chacha",
+]
+
+[[package]]
 name = "lib-neural-network"
 version = "0.1.0"
 dependencies = [
