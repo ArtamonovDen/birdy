@@ -1,6 +1,7 @@
 use rand::{seq::SliceRandom, Rng, RngCore};
 use std::ops::Index;
 pub trait Individual {
+    fn create(chromosome: Chromosome) -> Self;
     fn fitness(&self) -> f32;
     fn chromosome(&self) -> &Chromosome;
 }
@@ -17,6 +18,10 @@ pub trait CrossoverMethod {
         parent_a: &Chromosome,
         parent_b: &Chromosome,
     ) -> Chromosome;
+}
+
+pub trait MutationMethod {
+    fn mutate(&self, rng: &mut dyn RngCore, child: &mut Chromosome);
 }
 pub struct RouletteWheelSelection;
 #[derive(Clone, Debug)]
@@ -39,6 +44,39 @@ impl CrossoverMethod for UniformCrossover {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct GaussianMutation {
+    /// Probability of changing a gene:
+    /// - 0.0 = no genes will be touched
+    /// - 1.0 = all genes will be touched
+    chance: f32,
+
+    /// Magnitude of that change:
+    /// - 0.0 = touched genes will not be modified
+    /// - 3.0 = touched genes will be += or -= by at most 3.0
+    coeff: f32,
+}
+
+impl GaussianMutation {
+    pub fn new(chance: f32, coeff: f32) -> Self {
+        assert!(chance >= 0.0 && chance <= 1.0);
+        Self { chance, coeff }
+    }
+}
+
+impl MutationMethod for GaussianMutation {
+    fn mutate(&self, rng: &mut dyn RngCore, child: &mut Chromosome) {
+        for gene in child.iter_mut() {
+            let sign = if rng.gen_bool(0.5) { -1.0 } else { 1.0 };
+
+            if rng.gen_bool(self.chance as f64) {
+                *gene += sign * self.coeff * rng.gen::<f32>();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Chromosome {
     genes: Vec<f32>,
 }
@@ -96,16 +134,22 @@ impl SelectionMethod for RouletteWheelSelection {
 pub struct GeneticAlgorithm<S> {
     selection_method: S,
     crossover_method: Box<dyn CrossoverMethod>,
+    mutation_method: Box<dyn MutationMethod>,
 }
 
 impl<S> GeneticAlgorithm<S>
 where
     S: SelectionMethod,
 {
-    pub fn new(selection_method: S, crossover_mthod: impl CrossoverMethod + 'static) -> Self {
+    pub fn new(
+        selection_method: S,
+        crossover_method: impl CrossoverMethod + 'static,
+        mutation_method: impl MutationMethod + 'static,
+    ) -> Self {
         Self {
             selection_method,
-            crossover_method: Box::new(crossover_mthod),
+            crossover_method: Box::new(crossover_method),
+            mutation_method: Box::new(mutation_method),
         }
     }
 
@@ -120,8 +164,9 @@ where
                 let parent_a = self.selection_method.select(rng, population).chromosome();
                 let parent_b = self.selection_method.select(rng, population).chromosome();
                 let mut child = self.crossover_method.crossover(rng, parent_a, parent_b);
-                // TODO: mutation
-                todo!()
+
+                self.mutation_method.mutate(rng, &mut child);
+                I::create(child)
             })
             .collect()
     }
@@ -136,23 +181,44 @@ mod tests {
 
     use super::*;
 
-    #[derive(Clone, Debug)]
-    struct TestIndividual {
-        fitness: f32,
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestIndividual {
+        // For test requiring access to the chromosome
+        WithChromosome { chromosome: Chromosome },
+
+        // For test not requiring access to the chromosome
+        WithFitness { fitness: f32 },
     }
 
     impl TestIndividual {
         fn new(fitness: f32) -> Self {
-            Self { fitness }
+            Self::WithFitness { fitness }
+        }
+    }
+
+    impl PartialEq for Chromosome {
+        fn eq(&self, other: &Self) -> bool {
+            approx::relative_eq!(self.genes.as_slice(), other.genes.as_slice())
         }
     }
 
     impl Individual for TestIndividual {
+        fn create(chromosome: Chromosome) -> Self {
+            Self::WithChromosome {
+                chromosome: chromosome,
+            }
+        }
         fn fitness(&self) -> f32 {
-            self.fitness
+            match self {
+                Self::WithChromosome { chromosome } => chromosome.iter().sum(),
+                Self::WithFitness { fitness } => *fitness,
+            }
         }
         fn chromosome(&self) -> &Chromosome {
-            panic!("not supported for TestIndividual")
+            match self {
+                Self::WithChromosome { chromosome } => chromosome,
+                Self::WithFitness { .. } => panic!("not supported for testIndividual::WithFitness"),
+            }
         }
     }
 
@@ -183,6 +249,39 @@ mod tests {
     }
 
     #[test]
+    fn genetic_algorithm() {
+        fn individual(genes: &[f32]) -> TestIndividual {
+            TestIndividual::create(genes.iter().cloned().collect())
+        }
+
+        let mut rng = ChaCha8Rng::from_seed(Default::default());
+        let ga = GeneticAlgorithm::new(
+            RouletteWheelSelection,
+            UniformCrossover,
+            GaussianMutation::new(0.5, 0.5),
+        );
+
+        let mut population = vec![
+            individual(&[0.0, 0.0, 0.0]),
+            individual(&[1.0, 1.0, 1.0]),
+            individual(&[1.0, 2.0, 1.0]),
+            individual(&[1.0, 2.0, 4.0]),
+        ];
+
+        for _ in 0..10 {
+            population = ga.evolve(&mut rng, &population)
+        }
+
+        let expected_population = vec![
+            individual(&[0.4476949, 2.0648358, 4.3058133]),
+            individual(&[1.2126867, 1.5538777, 2.886911]),
+            individual(&[1.0617678, 2.265739, 4.428764]),
+            individual(&[0.95909685, 2.4618788, 4.024733]),
+        ];
+        assert_eq!(population, expected_population);
+    }
+
+    #[test]
     fn uniform_crossover() {
         let mut rng = ChaCha8Rng::from_seed(Default::default());
         let parent_a: Chromosome = (1..=100).map(|n| n as f32).collect();
@@ -195,5 +294,95 @@ mod tests {
 
         assert_eq!(diff_a, 49);
         assert_eq!(diff_b, 51);
+    }
+
+    mod gaussian_mutation {
+
+        use super::*;
+
+        fn actual(chance: f32, coeff: f32) -> Vec<f32> {
+            let mut rng = ChaCha8Rng::from_seed(Default::default());
+            let mut child = vec![1.0, 2.0, 3.0, 4.0, 5.0].into_iter().collect();
+
+            GaussianMutation::new(chance, coeff).mutate(&mut rng, &mut child);
+
+            child.into_iter().collect()
+        }
+        mod given_zero_chance {
+            use approx::assert_relative_eq;
+
+            fn actual(coeff: f32) -> Vec<f32> {
+                super::actual(0.0, coeff)
+            }
+            mod and_zero_coefficient {
+                use super::*;
+                #[test]
+                fn does_not_change_the_original_chromosome() {
+                    let actual = actual(0.0);
+                    let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+            mod and_non_zero_coefficient {
+                use super::*;
+                #[test]
+                fn does_not_change_the_original_chromosome() {
+                    let actual = actual(0.5);
+                    let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+        }
+
+        mod given_fifty_fifty_chance {
+            use approx::assert_relative_eq;
+            fn actual(coeff: f32) -> Vec<f32> {
+                super::actual(0.5, coeff)
+            }
+
+            mod and_zero_coefficient {
+                use super::*;
+                #[test]
+                fn does_not_change_the_original_chromosome() {
+                    let actual = actual(0.0);
+                    let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+            mod and_non_zero_coefficient {
+                use super::*;
+                #[test]
+                fn slightly_change_the_original_chromosome() {
+                    let actual = actual(0.5);
+                    let expected = vec![1.0, 1.7756249, 3.0, 4.1596804, 5.0];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+        }
+
+        mod given_max_chance {
+            use approx::assert_relative_eq;
+            fn actual(coeff: f32) -> Vec<f32> {
+                super::actual(1.0, coeff)
+            }
+            mod and_zero_coefficient {
+                use super::*;
+                #[test]
+                fn does_not_change_the_original_chromosome() {
+                    let actual = actual(0.0);
+                    let expected = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+            mod and_non_zero_coefficient {
+                use super::*;
+                #[test]
+                fn entirely_change_the_original_chromosome() {
+                    let actual = actual(1.0);
+                    let expected = vec![1.9090631, 2.2324157, 2.5512497, 3.901025, 4.2773824];
+                    assert_relative_eq!(actual.as_slice(), expected.as_slice());
+                }
+            }
+        }
     }
 }
