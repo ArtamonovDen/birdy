@@ -9,7 +9,12 @@ module.exports = {
     },
     mode: 'development',
     plugins: [
-        new CopyWebpackPlugin(['index.html', 'index.css']),
+        new CopyWebpackPlugin({
+            patterns: [
+                'index.html',
+                'index.css'
+            ]
+        }),
     ],
     devServer: {
         host: '0.0.0.0',
