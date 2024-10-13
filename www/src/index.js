@@ -41,6 +41,9 @@ CanvasRenderingContext2D.prototype.drawCircle = function (x, y, radius) {
 
 const simulation = new sim.Simulation();
 
+document.getElementById('train').onclick = function () {
+    console.log(simulation.train());
+};
 
 const viewport = document.getElementById('viewport');
 const viewportWidth = viewport.width;
@@ -61,7 +64,11 @@ ctxt.scale(viewportScale, viewportScale)
 function redraw() {
     ctxt.clearRect(0, 0, viewportWidth, viewportHeight);
 
-    simulation.step();
+    // Performs 10 steps per frame, which makes simulation 10x faster
+    // (at least if your computer can catch up!)
+    for (let i = 0; i < 3; i += 1) {
+        simulation.step();
+    }
 
     const world = simulation.world();
 

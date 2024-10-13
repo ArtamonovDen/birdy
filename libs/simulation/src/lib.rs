@@ -90,17 +90,27 @@ impl Simulation {
         }
     }
 
-    pub fn step(&mut self, rng: &mut dyn RngCore) {
+    pub fn step(&mut self, rng: &mut dyn RngCore) -> Option<ga::Statistics> {
         self.process_collisions(rng);
         self.process_brains();
         self.process_movements();
         self.age += 1;
 
         if self.age > GENERATION_LENGTH {
-            self.evolve(rng);
+            Some(self.evolve(rng))
+        } else {
+            None
         }
     }
-    fn evolve(&mut self, rng: &mut dyn RngCore) {
+    /// Fast-forwards 'till the end of the current generation.
+    pub fn train(&mut self, rng: &mut dyn RngCore) -> ga::Statistics {
+        loop {
+            if let Some(summary) = self.step(rng) {
+                return summary;
+            }
+        }
+    }
+    fn evolve(&mut self, rng: &mut dyn RngCore) -> ga::Statistics {
         self.age = 0;
 
         // Step 1: Prepare birdies to be sent into the genetic algorithm
@@ -111,7 +121,7 @@ impl Simulation {
             .map(AnimalIndividual::from_animal)
             .collect();
         // Evolves this `Vec<AnimalIndividual>`
-        let evolved_population = self.ga.evolve(rng, &current_population);
+        let (evolved_population, stats) = self.ga.evolve(rng, &current_population);
 
         // Transforms `Vec<AnimalIndividual>` back into `Vec<Animal>`
         self.world.animals = evolved_population
@@ -126,5 +136,6 @@ impl Simulation {
         for food in &mut self.world.foods {
             food.position = rng.gen();
         }
+        stats
     }
 }

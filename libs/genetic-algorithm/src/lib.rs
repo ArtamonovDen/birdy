@@ -153,13 +153,13 @@ where
         }
     }
 
-    pub fn evolve<I>(&self, rng: &mut dyn RngCore, population: &[I]) -> Vec<I>
+    pub fn evolve<I>(&self, rng: &mut dyn RngCore, population: &[I]) -> (Vec<I>, Statistics)
     where
         I: Individual,
     {
         assert!(!population.is_empty());
 
-        (0..population.len())
+        let new_population = (0..population.len())
             .map(|_| {
                 let parent_a = self.selection_method.select(rng, population).chromosome();
                 let parent_b = self.selection_method.select(rng, population).chromosome();
@@ -168,7 +168,44 @@ where
                 self.mutation_method.mutate(rng, &mut child);
                 I::create(child)
             })
-            .collect()
+            .collect();
+
+        let stats = Statistics::new(population);
+        (new_population, stats)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Statistics {
+    pub min_fitness: f32,
+    pub max_fitness: f32,
+    pub avg_fitness: f32,
+}
+
+impl Statistics {
+    fn new<I>(population: &[I]) -> Self
+    where
+        I: Individual,
+    {
+        assert!(!population.is_empty());
+
+        let mut min_fitness = population[0].fitness();
+        let mut max_fitness = min_fitness;
+        let mut sum_fitness = 0.0;
+
+        for individual in population {
+            let fitness = individual.fitness();
+
+            min_fitness = min_fitness.min(fitness);
+            max_fitness = max_fitness.max(fitness);
+            sum_fitness += fitness;
+        }
+
+        Self {
+            min_fitness,
+            max_fitness,
+            avg_fitness: sum_fitness / (population.len() as f32),
+        }
     }
 }
 
