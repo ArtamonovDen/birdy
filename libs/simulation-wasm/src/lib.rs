@@ -1,5 +1,3 @@
-use std::path::Ancestors;
-
 use lib_simulation as sim;
 use rand::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -24,7 +22,7 @@ impl Simulation {
     }
 
     pub fn step(&mut self) {
-        self.sim.step();
+        self.sim.step(&mut self.rng);
     }
 }
 
